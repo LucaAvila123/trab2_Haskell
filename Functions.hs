@@ -1,6 +1,7 @@
 module Functions where
 
 import System.IO (hFlush, stdout)
+import Data.List (sortBy, intercalate) 
 
 -- parte 1
 entrada_arquivo :: IO String
@@ -47,6 +48,7 @@ ler_pontos caminho = do
 
 -- parte 3
 type Ligacao = (Int, Int, Double)
+
 -- Calcula a distância euclidiana entre dois pontos (vetores de Double)
 distancia :: [Double] -> [Double] -> Double
 distancia xs ys = sqrt $ sum $ zipWith (\x y -> (x - y)^2) xs ys
@@ -102,91 +104,64 @@ minimoPorDistancia (x:xs) =
 
 -- parte 4
 
--- Encontra a ligação de maior distância em uma lista
-maiorLigacao :: [Ligacao] -> Ligacao
-maiorLigacao [] = error "Lista vazia!"
-maiorLigacao [x] = x
-maiorLigacao (x:xs) =
-    let maiorResto = maiorLigacao xs
-    in if terceiro x >= terceiro maiorResto then x else maiorResto
+-- Função para ordenar ligações por distância (maiores primeiro)
+ordenarLigacoes :: [Ligacao] -> [Ligacao]
+ordenarLigacoes = sortBy compararLigacoes
   where
-    terceiro (_, _, d) = d
+    compararLigacoes (a1, a2, ad) (b1, b2, bd)
+      | ad > bd = LT
+      | ad < bd = GT
+      | a1 < b1 = LT
+      | a1 > b1 = GT
+      | a2 < b2 = LT
+      | otherwise = GT
 
--- Verifica se um ponto está em um grupo
-pertenceAoGrupo :: Int -> [Int] -> Bool
-pertenceAoGrupo _ [] = False
-pertenceAoGrupo x (y:ys) = x == y || pertenceAoGrupo x ys
-
--- Divide um grupo em dois com base na maior ligação interna
--- Versão corrigida: não remove pontos, apenas divide o grupo em dois subconjuntos
-dividirGrupo :: [Int] -> [Ligacao] -> ([Int], [Int])
-dividirGrupo grupo ligacoes =
-    let ligacoesDoGrupo = filter (\(p1, p2, _) -> pertenceAoGrupo p1 grupo && pertenceAoGrupo p2 grupo) ligacoes
-        (p1, p2, _) = maiorLigacao ligacoesDoGrupo
-        -- Divide o grupo em dois, mantendo todos os pontos
-        -- Grupo 1: pontos conectados a p1 (incluindo p1)
-        -- Grupo 2: pontos conectados a p2 (incluindo p2)
-        (grupo1, grupo2) = separarGrupos grupo p1 p2 [] []
-    in (grupo1, grupo2)
+-- Função para dividir a lista de ligações em K grupos
+dividirEmKGrupos :: Int -> [Ligacao] -> [[Int]]
+dividirEmKGrupos k ligacoes = 
+    let n = length ligacoes + 1  -- Número total de pontos (ligações + 1)
+        gruposIniciais = [[i] | i <- [1..n]]  -- Cada ponto é seu próprio grupo
+        todasLigacoes = ordenarLigacoes ligacoes
+    in if k >= n 
+       then gruposIniciais  -- Cada ponto é um grupo se K >= N
+       else auxiliar gruposIniciais (reverse todasLigacoes) (n - k)
   where
-    -- Separa os pontos com base na conexão a p1 ou p2
-    separarGrupos [] _ _ acc1 acc2 = (acc1, acc2)
-    separarGrupos (x:xs) p1 p2 acc1 acc2
-        | x == p1 = separarGrupos xs p1 p2 (x:acc1) acc2
-        | x == p2 = separarGrupos xs p1 p2 acc1 (x:acc2)
-        | otherwise =
-            -- Verifica se x está conectado a p1 ou p2 nas ligações
-            case (estaConectado x p1 ligacoes, estaConectado x p2 ligacoes) of
-                (True, _) -> separarGrupos xs p1 p2 (x:acc1) acc2
-                (_, True) -> separarGrupos xs p1 p2 acc1 (x:acc2)
-                _ -> separarGrupos xs p1 p2 (x:acc1) (x:acc2)  -- Se não conectado, duplica (raro)
-
--- Verifica se dois pontos estão conectados (diretamente ou indiretamente)
-estaConectado :: Int -> Int -> [Ligacao] -> Bool
-estaConectado a b ligs =
-    any (\(p1, p2, _) -> (p1 == a && p2 == b) || (p1 == b && p2 == a)) ligs
+    auxiliar grupos [] _ = grupos
+    auxiliar grupos _ 0 = grupos
+    auxiliar grupos ((p1, p2, _):resto) cortes =
+        let grupo1 = encontrarGrupo p1 grupos
+            grupo2 = encontrarGrupo p2 grupos
+            novosGrupos = if grupo1 == grupo2 
+                          then grupos 
+                          else unirGrupos grupo1 grupo2 grupos
+        in auxiliar novosGrupos resto (if grupo1 == grupo2 then cortes else cortes - 1)
     
-----------------------------------------------------------
--- Algoritmo principal para formar K grupos
-----------------------------------------------------------
+    encontrarGrupo :: Int -> [[Int]] -> [Int]
+    encontrarGrupo p grupos = case filter (elem p) grupos of
+                                [] -> error "Ponto não encontrado em nenhum grupo"
+                                (g:_) -> g
+    
+    unirGrupos :: [Int] -> [Int] -> [[Int]] -> [[Int]]
+    unirGrupos g1 g2 grupos = 
+        let outrosGrupos = filter (\g -> g /= g1 && g /= g2) grupos
+        in (g1 ++ g2) : outrosGrupos
 
--- Função principal que divide os pontos em K grupos
-dividirEmKgrupos :: Int -> [Ponto] -> [Ligacao] -> [[Int]]
-dividirEmKgrupos k pontos ligacoes =
-    let todosPontos = map fst pontos  -- Pega apenas os números dos pontos
-        gruposIniciais = [todosPontos]  -- Começa com todos em um único grupo
-    in formarGrupos k gruposIniciais ligacoes
+-- Função para formatar os grupos para saída
+formatarGrupos :: [[Int]] -> String
+formatarGrupos = unlines . map (intercalate ", " . map show)
 
--- Função auxiliar que realiza as divisões até ter K grupos
-formarGrupos :: Int -> [[Int]] -> [Ligacao] -> [[Int]]
-formarGrupos k grupos ligacoes
-    | length grupos >= k = grupos  -- Condição de parada: já temos K grupos
-    | otherwise =
-        let -- Encontra o grupo com a maior ligação interna
-            (grupoMaior, ligMaior) = encontrarGrupoComMaiorLigacao grupos ligacoes
-            -- Divide esse grupo em dois
-            (grupo1, grupo2) = dividirGrupo grupoMaior ligacoes
-            -- Substitui o grupo antigo pelos dois novos
-            novosGrupos = grupo1 : grupo2 : filter (/= grupoMaior) grupos
-        in formarGrupos k novosGrupos ligacoes
+-- Função para escrever os grupos no arquivo de saída
+escreverGrupos :: FilePath -> [[Int]] -> IO ()
+escreverGrupos caminho grupos = 
+    writeFile caminho (formatarGrupos grupos)
 
--- Encontra o grupo que contém a maior ligação interna
-encontrarGrupoComMaiorLigacao :: [[Int]] -> [Ligacao] -> ([Int], Ligacao)
-encontrarGrupoComMaiorLigacao grupos ligacoes =
-    let ligacoesPorGrupo = [ (grupo, filter (\(p1, p2, _) -> pertenceAoGrupo p1 grupo && pertenceAoGrupo p2 grupo) ligacoes) | grupo <- grupos ]
-        -- Filtra grupos com ligações (evita grupos unitários)
-        gruposComLigacoes = filter (\(_, lgs) -> not (null lgs)) ligacoesPorGrupo
-        -- Encontra o grupo com a maior ligação
-        (grupo, lgs) = if null gruposComLigacoes
-                        then error "Não há ligações para dividir"
-                        else foldl1 (\acc@(_, lgs1) (g, lgs2) -> if maiorLigacao lgs2 > maiorLigacao lgs1 then (g, lgs2) else acc) gruposComLigacoes
-    in (grupo, maiorLigacao lgs)
-
-----------------------------------------------------------
--- Função para imprimir os grupos (apenas números dos pontos)
-----------------------------------------------------------
-
-imprimirGrupos :: [[Int]] -> IO ()
-imprimirGrupos grupos = do
-    putStrLn "Grupos finais:"
-    mapM_ (\grupo -> putStrLn $ "Grupo: " ++ show grupo) grupos
+-- Função principal que realiza todo o agrupamento
+realizarAgrupamento :: String -> String -> Int -> IO ()
+realizarAgrupamento entrada saida k = do
+    pontos <- ler_pontos entrada
+    let ligacoes = gerarLigacoes pontos
+    let n = length pontos
+    let grupos = dividirEmKGrupos (min k n) ligacoes  -- Garante que k não seja maior que n
+    escreverGrupos saida grupos
+    putStrLn "Agrupamentos:"
+    putStr (formatarGrupos grupos)
